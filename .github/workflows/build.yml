@@ -1,45 +1,47 @@
-name: Build jar to Release
+name: Build Python Image to GHCR
 
 on:
   push:
     branches: [ main ]
     paths:
-      - 'java/pox.yml'
-      - 'java/src/main/java/dev/sbxnative/App.java'
+      - 'python/**'
   workflow_dispatch:
 
 permissions:
-  contents: write 
+  contents: read
+  packages: write  # 允许工作流向 GHCR 推送镜像
 
 jobs:
-  build:
+  build-and-push:
     runs-on: ubuntu-latest
     
     steps:
     - uses: actions/checkout@v6
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v5
+    # 1. 登录到 GitHub Container Registry (GHCR)
+    - name: Log in to the Container registry
+      uses: docker/login-action@v3
       with:
-        java-version: '17'
-        distribution: 'temurin'
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build with Maven
-      run: |
-        cd java
-        mvn clean package
-        
-        # 重命名主JAR文件
-        mv target/server-1.0.jar server.jar
-        ls -la server.jar
-
-    - name: Create Release
-      uses: ncipollo/release-action@v1
+    # 2. 提取镜像标签元数据
+    - name: Extract metadata (tags, labels) for Docker
+      id: meta
+      uses: docker/metadata-action@v5
       with:
-        artifacts: "java/server.jar"
-        tag: ${{ github.ref_name }}
-        name: "java"
-        token: ${{ secrets.GITHUB_TOKEN }}
-        allowUpdates: true
-        replacesArtifacts: true
-        body: "Automated release from workflow run #${{ github.run_number }}"
+        images: ghcr.io/${{ github.repository_owner }}/sbx-python  # 镜像名称，你可以改成自己喜欢的名字
+        tags: |
+          latest
+          type=sha,format=short
+
+    # 3. 基于 python 目录下的 Dockerfile 构建并推送镜像
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./python          # 指定上下文为 python 文件夹
+        file: ./python/Dockerfile  # 指定 Dockerfile 路径
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
